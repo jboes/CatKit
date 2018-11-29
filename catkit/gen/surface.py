@@ -1,5 +1,6 @@
 from __future__ import division
 from .. import Gratoms
+from catkit import gen
 from . import symmetry
 from . import utils
 from . import adsorption
@@ -9,10 +10,6 @@ import itertools
 import warnings
 import scipy
 import ase
-try:
-    from math import gcd
-except ImportError:
-    from fractions import gcd
 
 
 class SlabGenerator(object):
@@ -115,130 +112,12 @@ class SlabGenerator(object):
         else:
             primitive_bulk = bulk
 
-        self._bulk = self.align_crystal(primitive_bulk, miller_index)
+        self._bulk = gen.bulk.align_crystal(
+            primitive_bulk, miller_index, self.tol)
 
-    def align_crystal(self, bulk, miller_index):
-        """Return an aligned unit cell from bulk unit cell. This alignment
-        rotates the a and b basis vectors to be parallel to the Miller index.
-
-        Parameters
-        ----------
-        bulk : Atoms object
-            Bulk system to be standardized.
-        miller_index : list (3,)
-            Miller indices to align with the basis vectors.
-
-        Returns
-        -------
-        new_bulk : Gratoms object
-            Standardized bulk unit cell.
-        """
-        del bulk.constraints
-
-        if len(np.nonzero(miller_index)[0]) == 1:
-            mi = max(np.abs(miller_index))
-            new_lattice = scipy.linalg.circulant(
-                miller_index[::-1] / mi).astype(int)
-        else:
-            h, k, l = miller_index
-            p, q = utils.ext_gcd(k, l)
-            a1, a2, a3 = bulk.cell
-
-            k1 = np.dot(p * (k * a1 - h * a2) + q * (l * a1 - h * a3),
-                        l * a2 - k * a3)
-            k2 = np.dot(l * (k * a1 - h * a2) - k * (l * a1 - h * a3),
-                        l * a2 - k * a3)
-
-            if abs(k2) > self.tol:
-                i = -int(np.round(k1 / k2))
-                p, q = p + i * l, q - i * k
-
-            a, b = utils.ext_gcd(p * k + q * l, h)
-
-            c1 = (p * k + q * l, -p * h, -q * h)
-            c2 = np.array((0, l, -k)) // abs(gcd(l, k))
-            c3 = (b, a * p, a * q)
-            new_lattice = np.array([c1, c2, c3])
-
-        scaled = np.linalg.solve(new_lattice.T,
-                                 bulk.get_scaled_positions().T).T
-        scaled -= np.floor(scaled + self.tol)
-
-        new_bulk = Gratoms(
-            positions=bulk.positions,
-            numbers=bulk.get_atomic_numbers(),
-            magmoms=bulk.get_initial_magnetic_moments(),
-            pbc=True)
-
-        if not self.attach_graph:
-            del new_bulk._graph
-
-        new_bulk.set_scaled_positions(scaled)
-        new_bulk.set_cell(np.dot(new_lattice, bulk.cell), scale_atoms=True)
-
-        # Align the longest of the ab basis vectors with x
-        d = np.linalg.norm(new_bulk.cell[:2], axis=1)
-        if d[1] > d[0]:
-            new_bulk.cell[[0, 1]] = new_bulk.cell[[1, 0]]
-        a = new_bulk.cell[0]
-        a3 = np.cross(a, new_bulk.cell[1]) / np.max(d)
-        ase.build.rotate(new_bulk, a3, (0, 0, 1), a, (1, 0, 0))
-
-        # Ensure the remaining basis vectors are positive in their
-        # corresponding axis
-        for i in range(1, 3):
-            if new_bulk.cell[i][i] < 0:
-                new_bulk.cell[i] *= -1
-        new_bulk.wrap(eps=1e-3)
-
-        return new_bulk
-
-    def get_unique_terminations(self):
-        """Determine the fractional coordinate shift that will result in
-        a unique surface termination. This is not required if bulk
-        standardization has been performed, since all available z shifts will
-        result in a unique termination for a primitive cell.
-
-        Returns
-        -------
-        unique_shift : array (n,)
-            Fractional coordinate shifts which will result in unique
-            terminations.
-        """
-        if self.unique_terminations is not None:
-            return self.unique_terminations
-
-        zcoords = utils.get_unique_coordinates(self._bulk)
-
-        if len(zcoords) > 1:
-            itol = self.tol ** -1
-            zdiff = np.cumsum(np.diff(zcoords))
-            zdiff = np.floor(zdiff * itol) / itol
-
-            sym = symmetry.Symmetry(self._bulk, self.tol)
-            rotations, translations = sym.get_symmetry_operations(affine=False)
-
-            # Find all symmetries which are rotations about the z-axis
-            zsym = np.abs(rotations)
-            zsym[:, 2, 2] -= 1
-            zsym = zsym[:, [0, 1, 2, 2, 2], [2, 2, 2, 0, 1]]
-            zsym = np.argwhere(zsym.sum(axis=1) == 0)
-
-            ztranslations = np.floor(translations[zsym, -1] * itol) / itol
-            z_symmetry = np.unique(ztranslations)
-
-            if len(z_symmetry) > 1:
-                unique_shift = np.argwhere(zdiff < z_symmetry[1]) + 1
-                unique_shift = np.append(0, zcoords[unique_shift])
-            else:
-                unique_shift = zcoords
-        else:
-            unique_shift = zcoords
-
-        self.unique_terminations = unique_shift
-        self.slab_basis = [None] * len(unique_shift)
-
-        return unique_shift
+        self.unique_terminations = gen.bulk.get_unique_terminations(
+            self._bulk, self.tol)
+        self.slab_basis = [None] * len(self.unique_terminations)
 
     def get_slab_basis(self, iterm=0, maxn=20):
         """Return a list of all terminations which have been properly shifted
@@ -247,7 +126,7 @@ class SlabGenerator(object):
         related the size of the slab.
 
         This step also contains periodically constrained orthogonalization of
-        the c basis. This implementation only works if the a anb b basis
+        the c basis. This implementation only works if the a and b basis
         vectors are properly aligned with the x and y axis. This is strictly to
         assist the correct identification of surface atoms.
 
@@ -265,8 +144,6 @@ class SlabGenerator(object):
         ibasis : Gratoms object
             Prepared, ith basis.
         """
-        terminations = self.get_unique_terminations()
-
         if self.slab_basis[iterm] is not None:
             ibasis = self.slab_basis[iterm].copy()
             return ibasis

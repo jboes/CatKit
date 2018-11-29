@@ -32,5 +32,7 @@ from . import symmetry
 from . import adsorption
 from . import surface
 from . import molecules
+from . import bulk
 
-__all__ = ['defaults', 'symmetry', 'adsorption', 'surface', 'molecules']
+__all__ = ['defaults', 'symmetry', 'adsorption',
+           'surface', 'molecules', 'bulk']

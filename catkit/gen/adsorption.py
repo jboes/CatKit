@@ -845,7 +845,7 @@ def _get_adsorption_sites(surface_positions, tol=1e-5):
                 if oright:
                     positions[3] += [bridge[j]]
                     r1topology[3] += [potential_hollow]
-                    r2topology[3] += []
+                    r2topology[3] += [[]]
                     r2topology[0][c] += [oc]
             else:
                 positions[1] += [bridge[j]]
@@ -859,7 +859,7 @@ def _get_adsorption_sites(surface_positions, tol=1e-5):
             hollow = np.average(positions[0][corners], axis=0)
             positions[2] += [hollow]
             r1topology[2] += [corners.tolist()]
-            r2topology[2] += []
+            r2topology[2] += [[]]
 
     # For collecting missed bridge neighbors
     for s in r1topology[3]:

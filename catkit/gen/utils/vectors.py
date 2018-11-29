@@ -65,3 +65,32 @@ def get_basis_vectors(coordinates):
         basis_vectors, axis=1, keepdims=True)
 
     return basis_vectors
+
+
+def get_cross_plane_vectors(vectors, z=0, tol=1e-5):
+    """Return the indices of vectors in a provided list which cross a given
+    plane. Only functions for planes parallel to the xy-dimensions.
+
+    Parameters
+    ----------
+    vectors : ndarray (N, 3)
+        Cartesian (or fractional) coordinates of the vectors.
+    z : float
+        The z-coordinate (Cartesian or fractional) of the xy-plane.
+    tol : float
+        Float point precision tolerance.
+
+    Returns
+    -------
+    cross_indices : ndarray (M, 2)
+        Indices of the vectors which cross the xy-plane.
+    """
+    if isinstance(z, list):
+        z, zneg = z
+        sel_z = vectors[:, :, 2] < (z + tol)
+        sel_z += vectors[:, :, 2] > (zneg + tol)
+
+    sel_cross = np.count_nonzero(sel_above, axis=1) == 1
+    cross_indices = np.where(sel_cross)[0]
+
+    return cross_indices
