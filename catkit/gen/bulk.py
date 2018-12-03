@@ -67,22 +67,23 @@ def align_crystal(bulk, miller_index, tol=1e-5):
     ab_norm = np.cross(*new_cell[:2])
     R = ase.build.tools.rotation_matrix(
         new_cell[0], [1, 0, 0], ab_norm, [0, 0, 1])
-    new_cell = np.dot(new_cell, R.T).round(-int(np.log10(tol)))
-    new_cell *= np.sign(new_cell)
+    new_cell = np.dot(new_cell, R.T)
 
     positions = np.dot(bulk.positions, R.T)
     positions = ase.geometry.wrap_positions(
         positions, new_cell, eps=tol)
-    positions = positions.round(-int(np.log10(tol)))
 
     new_bulk = bulk.copy()
     new_bulk.cell = new_cell
     new_bulk.positions = positions
 
+    new_cell *= np.sign(new_cell)
+    new_bulk.set_cell(new_cell, scale_atoms=True)
+
     return new_bulk
 
 
-def get_unique_terminations(bulk, tol):
+def get_unique_terminations(bulk, tol=1e-5):
     """Determine the fractional coordinate shift that will result in
     a unique surface termination. This is not required if bulk
     standardization has been performed, since all available z shifts will

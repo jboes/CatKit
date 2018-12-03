@@ -267,6 +267,8 @@ class AdsorptionSites():
             rotations = np.swapaxes(rotations, 1, 2)
 
             affine = np.append(rotations, translations[:, None], axis=1)
+            print(len(affine))
+            print(affine.round(3))
             points = self.frac_coords
             true_index = self.get_periodic_sites(False)
 
