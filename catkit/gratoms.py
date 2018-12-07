@@ -337,30 +337,30 @@ class Gratoms(ase.Atoms):
         if not self.edges:
             return self
 
-        # G = nx.get_edge_attributes(self._graph, 'vector')
-        # nodes = np.tile(np.array(list(G.keys()))[:, 0], (M, 1))
-        # nodes += np.arange(M)[:, None] * n
-        # nodes = nodes.flatten()
+        G = nx.get_edge_attributes(self._graph, 'vector')
+        nodes = np.tile(np.array(list(G.keys()))[:, 0], (M, 1))
+        nodes += np.arange(M)[:, None] * n
+        nodes = nodes.flatten()
 
-        # vectors = np.tile(np.array(list(G.values())), (M, 1))
-        # edges = vectors + positions[nodes]
+        vectors = np.tile(np.array(list(G.values())), (M, 1))
+        edges = vectors + positions[nodes]
 
-        # tol = 1e-5
-        # edges = np.linalg.solve(self._cell.T, edges.T).T
-        # edges = ((edges + tol) % 1) - tol
-        # frac = np.linalg.solve(self._cell.T, positions.T).T
+        tol = 1e-5
+        edges = np.linalg.solve(self._cell.T, edges.T).T
+        edges = ((edges + tol) % 1) - tol
+        frac = np.linalg.solve(self._cell.T, positions.T).T
 
-        # fdist = edges[None, :, :] - frac[:, None]
-        # match = np.where((np.abs(fdist) < tol).all(2))
-        # bonds = np.vstack([match[0], nodes[match[1]]]).T
+        fdist = edges[None, :, :] - frac[:, None]
+        match = np.where((np.abs(fdist) < tol).all(2))
+        bonds = np.vstack([match[0], nodes[match[1]]]).T
 
-        # self._graph = nx.MultiDiGraph()
-        # nodes = [[_, {'number': n}]
-        #          for _, n in enumerate(self.arrays['numbers'])]
-        # self._graph.add_nodes_from(nodes)
+        self._graph = nx.MultiDiGraph()
+        nodes = [[_, {'number': n}]
+                 for _, n in enumerate(self.arrays['numbers'])]
+        self._graph.add_nodes_from(nodes)
 
-        # edges = [(b[0], b[1], {'vector': vectors[i]})
-        #          for i, b in enumerate(bonds)]
-        # self._graph.add_edges_from(edges)
+        edges = [(b[0], b[1], {'vector': vectors[i]})
+                 for i, b in enumerate(bonds)]
+        self._graph.add_edges_from(edges)
 
         return self
