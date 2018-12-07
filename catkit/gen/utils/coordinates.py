@@ -222,43 +222,32 @@ def matching_coordinates(position, comparators, tol=1e-8):
     return match
 
 
-def get_unique_coordinates(atoms, axis=2, tag=False, tol=1e-3):
+def get_unique_coordinates(atoms, axis=2, tol=1e-5):
     """Return unique coordinate values of a given atoms object
     for a specified axis.
 
     Parameters
     ----------
-    atoms : object
+    atoms : Atoms object
         Atoms object to search for unique values along.
-    axis : int (0, 1, or 2)
+    axis : int  (0 | 1 | 2)
         Look for unique values along the x, y, or z axis.
-    tag : bool
-        Assign ASE-like tags to each layer of the slab.
     tol : float
-        The tolerance to search for unique values within.
+        Float point precision tolerance.
 
     Returns
     -------
-    values : ndarray (n,)
-        Array of unique positions in fractional coordinates.
+    values : ndarray (N,)
+        Unique positions in fractional coordinates.
     """
-    positions = (atoms.get_scaled_positions()[:, axis] + tol) % 1
-    positions -= tol
+    ltol = -int(np.log10(tol))
+    positions = atoms.get_scaled_positions()[:, axis]
+    fractional = positions - np.round(positions.round(ltol))
 
-    values = [positions[0]]
-    for d in positions[1:]:
-        if not np.isclose(d, values, atol=tol, rtol=tol).any():
-            values += [d]
-    values = np.sort(values)
+    _, index, inv = np.unique(
+        fractional, return_index=True, return_inverse=True)
 
-    if tag:
-        tags = []
-        for p in positions:
-            close = np.isclose(p, values[::-1], atol=tol, rtol=tol)
-            tags += [np.where(close)[0][0] + 1]
-        atoms.set_tags(tags)
-
-    return values
+    return positions[index]
 
 
 def get_integer_enumeration(N=3, span=[0, 2]):

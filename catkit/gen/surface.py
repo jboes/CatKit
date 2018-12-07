@@ -283,7 +283,14 @@ class SlabGenerator(object):
         if self.vacuum:
             slab.center(vacuum=self.vacuum, axis=2)
 
-        utils.get_unique_coordinates(slab, tag=True)
+        # The position is for tagging
+        # positions = slab.positions
+        # tags = []
+        # for p in positions:
+        #     close = np.isclose(p, values[::-1], rtol=self.tol)
+        #     tags += [np.where(close)[0][0] + 1]
+        # slab.set_tags(tags)
+
         if self.layer_type == 'sym':
             slab = self.make_symmetric(slab)
 

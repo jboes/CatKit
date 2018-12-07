@@ -42,22 +42,16 @@ class Gratoms(ase.Atoms):
             masses, magmoms, charges, scaled_positions, cell,
             pbc, celldisp, constraint, calculator, info)
 
-        if isinstance(edges, np.ndarray):
-            if self.pbc.any():
-                self._graph = nx.MultiGraph(edges)
-            else:
-                self._graph = nx.Graph(edges)
+        if self.pbc.any():
+            self._graph = nx.MultiDiGraph()
         else:
-            if self.pbc.any():
-                self._graph = nx.MultiGraph()
-            else:
-                self._graph = nx.Graph()
+            self._graph = nx.Graph()
 
         nodes = [[i, {'number': n}]
                  for i, n in enumerate(self.arrays['numbers'])]
         self._graph.add_nodes_from(nodes)
 
-        if isinstance(edges, list):
+        if isinstance(edges, (list, np.ndarray)):
             self._graph.add_edges_from(edges)
 
     @property
@@ -83,8 +77,7 @@ class Gratoms(ase.Atoms):
 
     @property
     def connectivity(self):
-        connectivity = nx.to_numpy_matrix(self._graph)
-        connectivity = np.array(connectivity, dtype=int)
+        connectivity = nx.to_numpy_matrix(self._graph).astype(int)
         return connectivity
 
     def get_surface_atoms(self):
@@ -266,9 +259,9 @@ class Gratoms(ase.Atoms):
             self.set_array(name, a)
 
         if isinstance(other, Gratoms):
-            if isinstance(self._graph, nx.MultiGraph) & \
+            if isinstance(self._graph, nx.Graph) & \
                isinstance(other._graph, nx.Graph):
-                other._graph = nx.MultiGraph(other._graph)
+                other._graph = nx.MultiDiGraph(other._graph)
 
             self._graph = nx.disjoint_union(self._graph, other._graph)
 
@@ -313,35 +306,61 @@ class Gratoms(ase.Atoms):
     def __imul__(self, m):
         """In-place repeat of atoms."""
         if isinstance(m, int):
-            m = (m, m, m)
+            m = [m, m, m]
 
         for x, vec in zip(m, self._cell):
             if x != 1 and not vec.any():
                 raise ValueError(
                     'Cannot repeat along undefined lattice vector')
 
-        M = np.product(m)
         n = len(self)
+        M = np.product(m)
 
         for name, a in self.arrays.items():
-            self.arrays[name] = np.tile(a, (M, ) + (1, ) * (len(a.shape) - 1))
-            cgraph = self._graph.copy()
+            repeat = np.ones(a.ndim, dtype=int)
+            repeat[0] = M
+            self.arrays[name] = np.tile(a, repeat)
+
+        s = [slice(0, _) for _ in m]
+        offset = np.mgrid[s].reshape(3, -1).T
+        offset = np.tile(offset, n).reshape(-1, 3)
 
         positions = self.arrays['positions']
-        i0 = 0
+        positions += np.dot(offset, self._cell)
 
-        for m0 in range(m[0]):
-            for m1 in range(m[1]):
-                for m2 in range(m[2]):
-                    i1 = i0 + n
-                    positions[i0:i1] += np.dot((m0, m1, m2), self._cell)
-                    i0 = i1
-                    if m0 + m1 + m2 != 0:
-                        self._graph = nx.disjoint_union(self._graph, cgraph)
+        self._cell *= np.asarray(m)[:, None]
 
         if self.constraints is not None:
             self.constraints = [c.repeat(m, n) for c in self.constraints]
 
-        self._cell = np.array([m[c] * self._cell[c] for c in range(3)])
+        # This part is for the 3D graph
+        if not self.edges:
+            return self
+
+        # G = nx.get_edge_attributes(self._graph, 'vector')
+        # nodes = np.tile(np.array(list(G.keys()))[:, 0], (M, 1))
+        # nodes += np.arange(M)[:, None] * n
+        # nodes = nodes.flatten()
+
+        # vectors = np.tile(np.array(list(G.values())), (M, 1))
+        # edges = vectors + positions[nodes]
+
+        # tol = 1e-5
+        # edges = np.linalg.solve(self._cell.T, edges.T).T
+        # edges = ((edges + tol) % 1) - tol
+        # frac = np.linalg.solve(self._cell.T, positions.T).T
+
+        # fdist = edges[None, :, :] - frac[:, None]
+        # match = np.where((np.abs(fdist) < tol).all(2))
+        # bonds = np.vstack([match[0], nodes[match[1]]]).T
+
+        # self._graph = nx.MultiDiGraph()
+        # nodes = [[_, {'number': n}]
+        #          for _, n in enumerate(self.arrays['numbers'])]
+        # self._graph.add_nodes_from(nodes)
+
+        # edges = [(b[0], b[1], {'vector': vectors[i]})
+        #          for i, b in enumerate(bonds)]
+        # self._graph.add_edges_from(edges)
 
         return self

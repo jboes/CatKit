@@ -1,5 +1,6 @@
 from .. import Gratoms
 from . import utils
+from . import symmetry
 import numpy as np
 import scipy
 import ase
@@ -63,7 +64,7 @@ def align_crystal(bulk, miller_index, tol=1e-5):
     new_cell[:2] = new_cell[np.argsort(basis_lengths)[::-1]]
 
     # Align the a-basis with x and the reset with their
-    # corresponding plane normals
+    # corresponding plane normals.
     ab_norm = np.cross(*new_cell[:2])
     R = ase.build.tools.rotation_matrix(
         new_cell[0], [1, 0, 0], ab_norm, [0, 0, 1])
@@ -77,6 +78,7 @@ def align_crystal(bulk, miller_index, tol=1e-5):
     new_bulk.cell = new_cell
     new_bulk.positions = positions
 
+    # Set all components to be positive.
     new_cell *= np.sign(new_cell)
     new_bulk.set_cell(new_cell, scale_atoms=True)
 
@@ -98,7 +100,7 @@ def get_unique_terminations(bulk, tol=1e-5):
 
     Returns
     -------
-    unique_shift : array (n,)
+    unique_shift : array (N,)
         Fractional coordinate shifts which will result in unique
         terminations.
     """
