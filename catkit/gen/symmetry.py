@@ -92,8 +92,8 @@ class Symmetry():
             Affine matrix operations, combinations of the rotation and
             translation with ones along the diagonal.
         """
-        rotations = self.data['rotations'][1:]
-        translations = self.data['translations'][1:]
+        rotations = self.data['rotations']
+        translations = self.data['translations']
 
         if affine:
             affine_matrices = np.zeros((rotations.shape[0], 4, 4))

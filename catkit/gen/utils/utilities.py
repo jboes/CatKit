@@ -179,3 +179,29 @@ def list_gcd(values):
     _gcd = np.ufunc.reduce(gcd_func, values)
 
     return _gcd
+
+
+def get_whole_factors(N):
+    """Return a sorted array of the whole factors which multiply
+    to give a requested value N.
+
+    Parameters
+    ----------
+    N : int
+        Whole factors of integer N.
+
+    Results
+    -------
+    whole_factors : ndarray (N, 2)
+        Enumerated multiples of N.
+    """
+    rng = range(1, int(N**0.5) + 1)
+
+    values = set()
+    [values.update([(i, N // i), (N // i, i)])
+     for i in rng if N % i == 0]
+    values = np.array(list(values))
+    srt = np.lexsort(values.T)
+    whole_factors = values[srt]
+
+    return whole_factors

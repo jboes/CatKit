@@ -1,13 +1,14 @@
 from .connectivity import (get_voronoi_neighbors, get_cutoff_neighbors)
 from .coordinates import (trilaterate, get_unique_xy, expand_cell,
                           matching_sites, get_integer_enumeration,
-                          matching_coordinates, get_unique_coordinates)
+                          matching_coordinates, get_unique_coordinates,
+                          get_matching_positions)
 from .graph import (connectivity_to_edges, isomorphic_molecules)
 from .vectors import (get_reciprocal_vectors, plane_normal, get_basis_vectors,
                       get_cross_plane_vectors)
 from .utilities import (running_mean, to_gratoms, get_atomic_numbers,
                         get_reference_energies, parse_slice, ext_gcd,
-                        list_gcd)
+                        list_gcd, get_whole_factors)
 
 __all__ = ['get_voronoi_neighbors',
            'get_cutoff_neighbors',
@@ -23,6 +24,7 @@ __all__ = ['get_voronoi_neighbors',
            'matching_coordinates',
            'get_unique_coordinates',
            'get_reciprocal_vectors',
+           'get_matching_positions',
            'plane_normal',
            'running_mean',
            'to_gratoms',
@@ -30,4 +32,5 @@ __all__ = ['get_voronoi_neighbors',
            'get_reference_energies',
            'parse_slice',
            'ext_gcd',
+           'get_whole_factors',
            'list_gcd']

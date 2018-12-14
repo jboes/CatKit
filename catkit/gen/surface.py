@@ -12,7 +12,7 @@ import scipy
 import ase
 
 
-class SlabGenerator(object):
+class SlabGenerator():
     """Class for generation of slab unit cells from bulk unit cells.
 
     Many surface operations rely upon / are made easier through the
@@ -222,7 +222,7 @@ class SlabGenerator(object):
         zcoords = scaled_zpositions - np.mean(scaled_zpositions)
         top = indices[zcoords[indices] >= 0]
         bottom = indices[zcoords[indices] < 0]
-        ibasis.set_surface_atoms(top=top, bottom=bottom)
+        ibasis.set_surface_atoms(top=top)
 
         self.slab_basis[iterm] = ibasis
 
@@ -358,37 +358,28 @@ class SlabGenerator(object):
         supercell = slab
 
         if isinstance(size, (int, np.integer)):
-            a = max(int(size / 2), 1) + size % 2 + 1
-            T = np.mgrid[-a:a + 1, -a:a + 1].reshape(2, -1).T
+            transforms = generate_transforms(size)
 
-            metrics = []
-            search_space = itertools.product(T, repeat=2)
-            for i, M in enumerate(search_space):
-                M = np.array(M)
-                if ~np.isclose(abs(np.linalg.det(M)), size):
-                    continue
+            targets = np.empty((len(transforms), 3))
+            for i, M in enumerate(transforms):
+                cell = np.dot(M.T, supercell.cell[:2, :2])
+                distance = np.linalg.norm(cell, axis=1)
+                angle = np.round(np.dot(*cell) / np.prod(distance), 2)
 
-                vector = np.dot(M.T, slab.cell[:2, :2])
-                d = np.linalg.norm(vector, axis=1)
+                dM = M.copy()
+                dM[[0, 1], [0, 1]] -= 1
+                dM = int(np.abs(dM).sum())
+                d = distance.sum().round(2)
 
-                angle = np.dot(vector[0], vector[1]) / np.prod(d)
-                diff = np.diff(d)[0]
+                targets[i] = [dM, np.abs(angle), d]
 
-                # obtuse angle
-                if angle < 0 or diff < 0:
-                    continue
+            if defaults.get('orthogonal'):
+                targets = targets.swapaxes(1, 2)
+            srt = np.lexsort(targets.T)
+            matrix = transforms[srt[0]]
 
-                metrics += [[d.sum(), angle, M]]
-
-            if metrics:
-                order = [0, 1]
-                if defaults.get('orthogonal'):
-                    order = [1, 0]
-
-                matrix = sorted(metrics,
-                                key=lambda x: (
-                                    x[order[0]], x[order[1]]))[0][-1]
-                supercell = transform_ab(supercell, matrix)
+            if targets[srt[0]][0] != 0:
+                supercell = gen.bulk.resize_cell(supercell, matrix)
 
         elif isinstance(size, (list, tuple, np.ndarray)):
             size = np.array(size, dtype=int)
@@ -396,7 +387,7 @@ class SlabGenerator(object):
             if size.shape == (2,):
                 supercell *= (size[0], size[1], 1)
             elif size.shape == (2, 2):
-                supercell = transform_ab(supercell, size)
+                supercell = gen.bulk.resize_cell(supercell, size)
 
         if self.attach_graph:
             # TODO: Creating the graph at this point is not ideal.
@@ -434,71 +425,7 @@ class SlabGenerator(object):
                               'slab size.')
                 break
 
-
         return slab
-
-def transform_ab(slab, matrix, tol=1e-5):
-    """Transform the slab basis vectors parallel to the z-plane
-    by matrix notation. This can result in changing the slabs
-    cell size. This can also result in very unusual slab dimensions,
-    use with caution.
-
-    Parameters
-    ----------
-    slab : Atoms object
-        The slab to be transformed.
-    matrix : array_like (2, 2)
-        The matrix notation transformation of the a and b basis vectors.
-    tol : float
-        Float point precision tolerance.
-
-    Returns
-    -------
-    slab : Atoms object
-        Slab after transformation.
-    """
-    M = np.eye(3)
-    M[:2, :2] = np.array(matrix).T
-    newcell = np.dot(M, slab.cell)
-
-    scorners_newcell = np.array([
-        [0, 0], [1, 0],
-        [0, 1], [1, 1]])
-
-    corners = np.dot(scorners_newcell, newcell[:2, :2])
-    scorners = np.linalg.solve(slab.cell[:2, :2].T, corners.T).T
-    rep = np.ceil(scorners.ptp(axis=0)).astype(int)
-
-    slab *= (rep[0], rep[1], 1)
-    slab.set_cell(newcell)
-
-    coords = slab.get_scaled_positions()
-    original_index = np.arange(coords.shape[0])
-    periodic_match = original_index.copy()
-    for i, j in enumerate(periodic_match):
-        if i != j:
-            continue
-
-        matched = utils.matching_sites(coords[i], coords)
-        periodic_match[matched] = i
-
-    repeated = np.where(periodic_match != original_index)
-    del slab[repeated]
-
-    # Align the first basis vector with x
-    sign = np.sign(slab.cell[2][2])
-    slab.rotate(slab.cell[0], 'x', rotate_cell=True)
-    if sign != np.sign(slab.cell[2][2]):
-        slab.arrays['surface_atoms'] *= -1
-
-    if slab.cell[1][1] < 0:
-        slab.cell[1] *= -1
-    if slab.cell[2][2] < 0:
-        slab.translate([0, 0, -slab.cell[2][2]])
-        slab.cell[2][2] = -slab.cell[2][2]
-
-    return slab
-
 
 def convert_miller_index(miller_index, atoms1, atoms2):
     """Return a converted miller index between two atoms objects."""
@@ -611,3 +538,48 @@ def get_degenerate_indices(bulk, miller_index):
     degenerate_indices = np.flip(degenerate_indices, axis=0).astype(int)
 
     return degenerate_indices
+
+
+def generate_transforms(volume):
+    """Return an enumerated list of possibly relevant 2D
+    surface transformations. This is intended to be used on a
+    normalized bulk structure, i.e. cell with upper diagonals
+    set to zero and all non-zero entries positive.
+
+    For transformation matrix: [[A, a], [b, B]], the required
+    space can be explored by considering all value ranges
+    which produce a determinant equal to the desired volume
+    multiple.
+
+    Parameters
+    ----------
+    volume : int
+        Desired volume multiple of the unit cell, must be >= 1.
+
+    Returns
+    -------
+    transforms : ndarray (N, 2, 2)
+        2D transformation matrices. Specifically the upper two
+        rows and columns.
+    """
+    N = volume
+    cd = np.mgrid[slice(-N, 1), slice(0, 1)].reshape(2, -1).T
+    AB = utils.get_integer_enumeration(N=2, span=[0, int(N**0.5) + 1])
+    products = np.prod(AB, 1) - N
+
+    transforms = []
+    for i, v in enumerate(products):
+        if v == 0:
+            ab = cd
+        else:
+            ab = utils.get_whole_factors(abs(v))
+            sign = np.sign(v)
+            ab[:, 0] *= sign
+
+        diag = np.tile(AB[i], len(ab))
+        M = np.c_[diag, ab.flatten()]
+        M[1::2] = M[1::2][:, ::-1]
+        transforms += [M.reshape(-1, 2, 2)]
+    transforms = np.vstack(transforms)
+
+    return transforms

@@ -45,7 +45,7 @@ class Gratoms(ase.Atoms):
         if self.pbc.any():
             self._graph = nx.MultiDiGraph()
         else:
-            self._graph = nx.Graph()
+            self._graph = nx.Graph(edges)
 
         nodes = [[i, {'number': n}]
                  for i, n in enumerate(self.arrays['numbers'])]
@@ -53,6 +53,8 @@ class Gratoms(ase.Atoms):
 
         if isinstance(edges, (list, np.ndarray)):
             self._graph.add_edges_from(edges)
+
+        self._sites = None
 
     @property
     def graph(self):
@@ -85,19 +87,37 @@ class Gratoms(ase.Atoms):
         surf_atoms = np.where(self.get_array('surface_atoms') > 0)[0]
         return surf_atoms
 
-    def set_surface_atoms(self, top, bottom=None):
+    def set_surface_atoms(self, top):
         """Assign surface atoms."""
         n = np.zeros(len(self))
-        if bottom is not None:
-            n[bottom] = -1
-        # Overwrites bottom indexing
         n[top] = 1
         self.set_array('surface_atoms', n)
+
+    def set_site_properties(
+            self,
+            positions,
+            connectivity=None,
+            symmetry=None):
+        """Set the adsorption site properties"""
+        if symmetry is None:
+            symmetry = np.arange(len(positions))
+        if self._sites is None:
+            self._sites = SiteGraph(
+                positions=positions,
+                cell=self._cell,
+                tags=symmetry)
+
+    def get_site_property(self, name):
+        """Get adsorption site property."""
+        if self._sites is None:
+            value = None
+        else:
+            value = getattr(self._sites, name)
+        return value
 
     def get_neighbor_symbols(self, u):
         """Get chemical symbols for neighboring atoms of u."""
         neighbors = list(self._graph[u])
-
         return sym[self.arrays['numbers'][neighbors]]
 
     def is_isomorph(self, other):
@@ -150,6 +170,8 @@ class Gratoms(ase.Atoms):
         atoms.constraints = copy.deepcopy(self.constraints)
         if hasattr(self, '_graph'):
             atoms._graph = self._graph.copy()
+        if getattr(self, '_sites'):
+            atoms._sites = self._sites.copy()
 
         return atoms
 
@@ -259,8 +281,8 @@ class Gratoms(ase.Atoms):
             self.set_array(name, a)
 
         if isinstance(other, Gratoms):
-            if isinstance(self._graph, nx.Graph) & \
-               isinstance(other._graph, nx.Graph):
+            tg = isinstance(self._graph, nx.Graph)
+            if tg & isinstance(other._graph, nx.Graph):
                 other._graph = nx.MultiDiGraph(other._graph)
 
             self._graph = nx.disjoint_union(self._graph, other._graph)
@@ -307,6 +329,8 @@ class Gratoms(ase.Atoms):
         """In-place repeat of atoms."""
         if isinstance(m, int):
             m = [m, m, m]
+        if np.all(m == 1):
+            return self
 
         for x, vec in zip(m, self._cell):
             if x != 1 and not vec.any():
@@ -328,10 +352,20 @@ class Gratoms(ase.Atoms):
         positions = self.arrays['positions']
         positions += np.dot(offset, self._cell)
 
+        # For adsorption sites
+        sites = self._sites
+        if sites:
+            sites *= [m[0], m[1], 1]
+ 
         self._cell *= np.asarray(m)[:, None]
 
         if self.constraints is not None:
             self.constraints = [c.repeat(m, n) for c in self.constraints]
+
+        self._graph = nx.MultiDiGraph()
+        nodes = [[_, {'number': n}]
+                 for _, n in enumerate(self.arrays['numbers'])]
+        self._graph.add_nodes_from(nodes)
 
         # This part is for the 3D graph
         if not self.edges:
@@ -354,13 +388,18 @@ class Gratoms(ase.Atoms):
         match = np.where((np.abs(fdist) < tol).all(2))
         bonds = np.vstack([match[0], nodes[match[1]]]).T
 
-        self._graph = nx.MultiDiGraph()
-        nodes = [[_, {'number': n}]
-                 for _, n in enumerate(self.arrays['numbers'])]
-        self._graph.add_nodes_from(nodes)
-
         edges = [(b[0], b[1], {'vector': vectors[i]})
                  for i, b in enumerate(bonds)]
         self._graph.add_edges_from(edges)
 
         return self
+
+
+class SiteGraph(Gratoms):
+
+    def set_connectivity(self, connectivity=None):
+        """Set connectivity of the sites"""
+        if connectivity is None:
+            n = len(self.positions)
+            connectivity = [[] for _ in range(n)]
+        self.connectivity = np.asarray(connectivity)

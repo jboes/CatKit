@@ -191,6 +191,8 @@ def matching_sites(position, comparators, tol=1e-8):
     return match
 
 
+
+
 def matching_coordinates(position, comparators, tol=1e-8):
     """Get the indices of all points in a comparator list that are
     equal to a given position (with a tolerance), taking into
@@ -274,3 +276,31 @@ def get_integer_enumeration(N=3, span=[0, 2]):
     enumeration = np.mgrid[[span] * N].reshape(N, -1).T
 
     return enumeration
+
+
+def get_matching_positions(fractional):
+    """Return the indices of the given fractional coordinates
+    which overlap.
+
+    Parameters
+    ----------
+    fractional ndarray of float (N, 3)
+
+    Returns
+    -------
+    match : ndarray of bool (N,)
+        The indices which correspond to sites with equivalent
+        positions.
+    """
+    original_index = np.arange(fractional.shape[0])
+    periodic_match = original_index.copy()
+    for i, j in enumerate(periodic_match):
+        if i != j:
+            continue
+
+        matched = matching_sites(fractional[i], fractional)
+        periodic_match[matched] = i
+
+    match = periodic_match != original_index
+
+    return match
