@@ -52,7 +52,7 @@ def get_potential_energy(
     return fwio.atoms_to_encode(images)
 
 
-def catflow_relaxation(atoms=None, calculator_name=None, parameters=None):
+def catflow_relaxation(atoms=None, parameters=None, calculator_name=None):
     """Performs a relaxation of an arbitrary structure in a manor
     consistent with catflow database conventions.
 
@@ -61,11 +61,13 @@ def catflow_relaxation(atoms=None, calculator_name=None, parameters=None):
 
     Parameters
     ----------
-    calculator : str
-        String representation of a calculator import.
-        This currently only supports an Espresso calculator (ASE or decaf).
+    atoms : Atoms object
+        Structure to be relaxed.
     parameters : dict
         Calculation parameters to use.
+    calculator_name : str
+        String representation of a calculator import.
+        This currently only supports an Espresso calculator (ASE or decaf).
     """
     if atoms is None:
         atoms = ase.io.read('input.traj')
@@ -92,21 +94,18 @@ def catflow_relaxation(atoms=None, calculator_name=None, parameters=None):
     if isinstance(calc, decaf.Espresso):
         # Patch for reading magmom of trajectory
         images = decaf.io.read('pw0.pwo', ':')
-        images[0].info = data
-        if np.all(atoms.pbc):
-            images += [atoms]
     else:
         images = ase.io.read('pw0.pwo', ':')
-        images[0].info = data
-        if np.all(atoms.pbc):
-            images += [atoms]
+    images[0].info = data
+    if np.all(atoms.pbc):
+        images += [atoms]
 
     # Moneky patch for constraints and pbc conservation.
     for image in images:
         image.constraints = atoms.constraints
         image._pbc = atoms.pbc
 
-    with db.Connect() as dbflow:
-        dbflow.update_bulk_entry(images)
+    # with db.Connect() as dbflow:
+    #     dbflow.update_bulk_entry(images)
 
     return fwio.atoms_to_encode(images)

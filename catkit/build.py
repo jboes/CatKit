@@ -40,9 +40,8 @@ def surface(
         size,
         miller=(1, 1, 1),
         termination=0,
+        vacuum=12,
         fixed=0,
-        vacuum=10,
-        orthogonal=False,
         **kwargs):
     """A helper function to return the surface associated with a
     given set of input parameters to the general surface generator.
@@ -52,19 +51,17 @@ def surface(
     elements : str or object
         The atomic symbol to be passed to the as bulk builder function
         or an atoms object representing the bulk structure to use.
-    size : list (3,)
-        Number of time to expand the x, y, and z primitive cell.
-    miller : list (3,) or (4,)
-        The miller index to cleave the surface structure from. If 4 values
-        are used, assume Miller-Bravis convention.
+    size : array_like (2,)
+        Volume multiple of the top cell and the number of layers.
+    miller : list (3,) | (4,)
+        The miller index to cleave the surface structure from.
+        If 4 values are used, assume Miller-Bravis convention.
     termination : int
         The index associated with a specific slab termination.
     fixed : int
         Number of layers to constrain.
     vacuum : float
         Angstroms of vacuum to add to the unit cell.
-    orthogonal : bool
-        Force the slab generator to produce the most orthogonal slab.
 
     Returns
     -------
@@ -82,29 +79,30 @@ def surface(
                 del bkwargs[key]
         atoms = ase.build.bulk(elements, **bkwargs)
 
+    miller = catkit.gen.surface.bravis_miller_to_miller(miller)
+
+    satoms = catkit.gen.symmetry.get_standardized_cell(atoms)
+    atoms = catkit.gen.symmetry.get_standardized_cell(
+        atoms, primitive=True)
+
+    miller = catkit.gen.surface.convert_miller_index(
+        miller, satoms, atoms)
+
     generator = catkit.gen.surface.SlabGenerator(
         bulk=atoms,
         miller_index=miller,
         layers=size[-1],
-        vacuum=vacuum,
-        fixed=fixed,
-        layer_type=kwargs.get('layer_type', 'trim'),
-        attach_graph=kwargs.get('attach_graph', True),
-        standardize_bulk=kwargs.get('standardize_bulk', True),
+        termination=termination,
         tol=kwargs.get('tol', 1e-8)
     )
 
-    if len(size) == 2:
-        size = size[0]
-    elif len(size) == 3 and not orthogonal:
-        size = size[:2]
+    slab = generator.get_slab(size=size[0], vacuum=vacuum)
 
-    if orthogonal:
-        catkit.gen.defaults['orthogonal'] = True
-        if isinstance(size, (list, tuple)):
-            size = np.prod(size[:2])
-
-    slab = generator.get_slab(size=size, iterm=termination)
+    if fixed:
+        tags = slab.get_tags()
+        constraints = ase.constraints.FixAtoms(
+            mask=tags > (tags.max() - fixed))
+        slab.set_constraint(constraints)
 
     return slab
 

@@ -42,7 +42,7 @@ def get_standardized_cell(atoms, primitive=False, tol=1e-5):
     atoms = Gratoms(symbols=_numbers, cell=_lattice, pbc=atoms.pbc)
     atoms.set_scaled_positions(_positions)
     atoms.translate(-atoms[0].position)
-    atoms.wrap()
+    atoms.wrap(eps=tol)
     atoms.set_initial_magnetic_moments(_magmoms)
 
     return atoms

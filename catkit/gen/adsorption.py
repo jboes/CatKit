@@ -232,13 +232,6 @@ class AdsorptionSites():
         if screen:
             return periodic_match[self.screen]
 
-        coords = self.frac_coords
-        periodic = periodic_match.copy()[self.screen]
-
-        for p in periodic:
-            matched = utils.matching_sites(self.frac_coords[p], coords)
-            periodic_match[matched] = p
-
         return periodic_match
 
     def get_symmetric_sites(self, unique=True, screen=True):
@@ -315,8 +308,9 @@ class AdsorptionSites():
             All edges crossing ridge or vertices indexed by the expanded
             unit slab.
         """
-        vt = scipy.spatial.Voronoi(self.coordinates[:, :2],
-                                   qhull_options='Qbb Qc Qz C{}'.format(1e-2))
+        vt = scipy.spatial.Voronoi(
+            self.coordinates[:, :2],
+            qhull_options='Qbb Qc Qz C{}'.format(1e-2))
 
         select, lens = [], []
         for i, p in enumerate(vt.point_region):
@@ -785,5 +779,7 @@ def symmetry_equivalent_points(
         d -= np.round(d)
         dind = np.where((np.abs(d) < tol).all(axis=2))[-1]
         symmetry_match[np.unique(dind)] = periodic_match[i]
+
+    _, symmetry_match = np.unique(symmetry_match, return_inverse=True)
 
     return symmetry_match

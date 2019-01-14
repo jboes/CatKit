@@ -3,6 +3,7 @@ import numpy as np
 import ase
 import copy
 import warnings
+from ase import Atoms
 try:
     from builtins import super
 except(ImportError):
@@ -42,10 +43,7 @@ class Gratoms(ase.Atoms):
             masses, magmoms, charges, scaled_positions, cell,
             pbc, celldisp, constraint, calculator, info)
 
-        if self.pbc.any():
-            self._graph = nx.MultiDiGraph()
-        else:
-            self._graph = nx.Graph(edges)
+        self._graph = nx.MultiDiGraph()
 
         nodes = [[i, {'number': n}]
                  for i, n in enumerate(self.arrays['numbers'])]
@@ -101,11 +99,14 @@ class Gratoms(ase.Atoms):
         """Set the adsorption site properties"""
         if symmetry is None:
             symmetry = np.arange(len(positions))
+        if connectivity is None:
+            connectivity = np.arange(len(positions))
         if self._sites is None:
-            self._sites = SiteGraph(
+            self._sites = Atoms(
                 positions=positions,
                 cell=self._cell,
                 tags=symmetry)
+            self._sites.arrays['connectivity'] = connectivity
 
     def get_site_property(self, name):
         """Get adsorption site property."""
@@ -229,6 +230,8 @@ class Gratoms(ase.Atoms):
 
         atoms = self.__class__(cell=self._cell, pbc=self._pbc, info=self.info,
                                celldisp=self._celldisp)
+        if self._sites:
+            atoms._sites = self._sites.copy()
 
         atoms.arrays = {}
         for name, a in self.arrays.items():
@@ -356,6 +359,7 @@ class Gratoms(ase.Atoms):
         sites = self._sites
         if sites:
             sites *= [m[0], m[1], 1]
+            sites.cell = self.cell
  
         self._cell *= np.asarray(m)[:, None]
 
@@ -393,13 +397,3 @@ class Gratoms(ase.Atoms):
         self._graph.add_edges_from(edges)
 
         return self
-
-
-class SiteGraph(Gratoms):
-
-    def set_connectivity(self, connectivity=None):
-        """Set connectivity of the sites"""
-        if connectivity is None:
-            n = len(self.positions)
-            connectivity = [[] for _ in range(n)]
-        self.connectivity = np.asarray(connectivity)

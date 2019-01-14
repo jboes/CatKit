@@ -61,7 +61,7 @@ def align_crystal(bulk, miller_index, tol=1e-5):
     return new_bulk
 
 
-def normalize_cell(atoms, new_cell=None, tol=1e-5):
+def normalize_cell(atoms, newcell, tol=1e-5):
     """Return a normalized cell. The a-basis is always the longer of a 
     and b, and aligned with the x dimension. The b- and c-basis are 
     aligned with the positive surface normal which they correspond to.
@@ -70,7 +70,7 @@ def normalize_cell(atoms, new_cell=None, tol=1e-5):
     ----------
     atoms : Atoms object
         Structure to be normalized.
-    new_cell : ndarray (3, 3)
+    newcell : ndarray (3, 3)
         A unit cell to normalize and apply to the atoms object.
     tol : float
         Float point precision tolerance.
@@ -80,41 +80,46 @@ def normalize_cell(atoms, new_cell=None, tol=1e-5):
     new_atoms : Atoms object
         The normalized structure.
     """
-    if new_cell is None:
-        new_cell = atoms.get_cell()
+    positions = atoms.positions
+    sites = atoms._sites
+    n = len(atoms)
+    if sites:
+        positions = np.vstack([positions, atoms._sites.positions])
+        n += len(sites)
+    amask = np.arange(n) < len(atoms)
 
-    # Ensure the b-basis is longer than the a-basis
-    basis_lengths = np.linalg.norm(new_cell[:2], axis=1)
-    new_cell[:2] = new_cell[np.argsort(basis_lengths)[::-1]]
+    # |a| <= |b|
+    basis_lengths = np.linalg.norm(newcell[:2], axis=1)
+    newcell[:2] = newcell[np.argsort(basis_lengths)]
 
-    # Align the a-basis with x and the reset with their
+    # Align a with x and the reset with their
     # corresponding plane normals.
-    ab_norm = np.cross(*new_cell[:2])
+    ab_norm = np.cross(*newcell[:2])
     R = ase.build.tools.rotation_matrix(
-        new_cell[0], [1, 0, 0], ab_norm, [0, 0, 1])
-    new_cell = np.dot(new_cell, R.T)
+        newcell[0], [1, 0, 0], ab_norm, [0, 0, 1])
+    newcell = np.dot(newcell, R.T)
+    positions = np.dot(positions, R.T)
 
+    if newcell[2][2] < -tol:
+        R = np.diag([1, 1, -1])
+        newcell = np.dot(newcell, R.T)
+        positions = np.dot(positions, R.T)
+
+    if newcell[1][0] < -tol:
+        R = np.diag([-1, 1, 1])
+        newcell = np.dot(newcell, R.T)
+        positions = np.dot(positions, R.T)
+        newcell[0] *= -1
 
     new_atoms = atoms.copy()
-    new_atoms.cell = new_cell
-    new_atoms.positions = np.dot(atoms.positions, R.T)
-
-    sites = new_atoms._sites
-    if sites:
-        sites.positions = np.dot(sites.positions, R.T)
-        sites.cell = new_cell
-
-    # Set all components to be positive.
-    det = np.sign(np.linalg.det(new_cell))
-    # new_cell *= np.sign(new_cell)
-    new_cell[2] *= -1
-
-    new_atoms.set_cell(new_cell)
+    new_atoms.cell = newcell
+    new_atoms.positions = positions[amask]
     new_atoms.wrap(eps=tol)
-
-    # if sites:
-    #     sites.set_cell(new_cell, scale_atoms=scale)
-    #     sites.wrap(eps=tol, pbc=True)
+    if sites:
+        new_sites = new_atoms._sites
+        new_sites.cell = newcell
+        new_sites.positions = positions[~amask]
+        new_sites.wrap(eps=tol, pbc=new_atoms.pbc)
 
     return new_atoms
 
@@ -138,32 +143,28 @@ def get_unique_terminations(bulk, tol=1e-5):
         Fractional coordinate shifts which will result in unique
         terminations.
     """
-    zcoords = utils.get_unique_coordinates(bulk)
+    fractionalz = bulk.get_scaled_positions()[:, 2]
+    zmatch = utils.get_matching_positions(fractionalz, tol)
+    unique = np.unique(zmatch)
+    unique_shift = fractionalz[unique]
 
-    if len(zcoords) > 1:
-        itol = tol ** -1
-        zdiff = np.cumsum(np.diff(zcoords))
-        zdiff = np.floor(zdiff * itol) / itol
-
+    if len(fractionalz) > 1:
         sym = symmetry.Symmetry(bulk, tol)
-        rotations, translations = sym.get_symmetry_operations(affine=False)
+        rotations, translations = sym.get_symmetry_operations(
+            affine=False)
 
         # Find all symmetries which are rotations about the z-axis
         zsym = np.abs(rotations)
         zsym[:, 2, 2] -= 1
         zsym = zsym[:, [0, 1, 2, 2, 2], [2, 2, 2, 0, 1]]
-        zsym = np.argwhere(zsym.sum(axis=1) == 0)
+        zsym = np.argwhere(zsym.sum(1) == 0)
 
-        ztranslations = np.floor(translations[zsym, -1] * itol) / itol
-        z_symmetry = np.unique(ztranslations)
+        z_symmetry = np.unique(translations[:, 2])
+        zdiff = np.cumsum(np.diff(fractionalz))
 
         if len(z_symmetry) > 1:
             unique_shift = np.argwhere(zdiff < z_symmetry[1]) + 1
-            unique_shift = np.append(0, zcoords[unique_shift])
-        else:
-            unique_shift = zcoords
-    else:
-        unique_shift = zcoords
+            unique_shift = np.append(0, fractionalz[unique_shift])
 
     return unique_shift
 
@@ -196,6 +197,7 @@ class GraphGenerator():
         self.voronoi = voronoi
         self.atoms = atoms
         self.tol = tol
+        self.surface_atoms = None
 
     def get_voronoi_graph(self):
         """Return the Voronoi graph of a 3D periodic structure.
@@ -233,14 +235,15 @@ class GraphGenerator():
         return graph
 
     def get_adsorption_sites(self):
-        """
+        """Return the adsorption sites associated with a
+        miller plane 
 
         Returns
         -------
         positions : ndarray (N, 3)
-
-        connectivity : list of lists ()
-            
+            Cartesian coordinates of the surface sites.
+        connectivity : list of lists (N, X)
+            Surface atoms which the site connects with.
         """
         points = self.voronoi.ridge_points
         zridge = self.positions[points][:, :, 2] > -self.tol
@@ -251,6 +254,7 @@ class GraphGenerator():
         xy_points = np.where(inside_xy)[0]
         sel = np.in1d(xy_points, surface_indices)
         basis_indices = xy_points[sel]
+        self.surface_atoms = self.index[basis_indices]
 
         sel = np.in1d(
             points.flatten(), surface_indices).reshape(-1, 2)
@@ -303,7 +307,7 @@ class GraphGenerator():
                     continue
                 hollow4 += [np.append(edge, opposites)]
 
-            pos4 = self.positions[np.array(hollow4)]
+            pos4 = self.positions[np.array(hollow4, dtype=int)]
             sites += pos4.mean(1).tolist()
             connectivity += hollow4
 
@@ -337,7 +341,7 @@ def resize_cell(atoms, matrix):
     Returns
     -------
     resized_atoms : Atoms oject
-        Resized strucutre.
+        Resized structure.
     """
     dim = matrix.shape[0]
     M = np.eye(3)
@@ -356,19 +360,21 @@ def resize_cell(atoms, matrix):
     atoms = atoms.copy()
     atoms *= repeat
     atoms.set_cell(newcell)
-    atoms._sites.cell = atoms.cell
 
     fractional = atoms.get_scaled_positions()
     match = utils.get_matching_positions(fractional)
+    match = match != np.arange(len(match))
     del atoms[match]
 
     # Adsorption sites
     sites = atoms._sites
     if sites:
+        atoms._sites.cell = atoms.cell
         sfrac = sites.get_scaled_positions()
         match = utils.get_matching_positions(sfrac)
+        match = match != np.arange(len(match))
         del sites[match]
 
-    atoms = normalize_cell(atoms)
+    atoms = normalize_cell(atoms, newcell)
 
     return atoms

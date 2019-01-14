@@ -127,129 +127,34 @@ def trilaterate(centers, r, zvector=None):
     return intersection
 
 
-def get_unique_xy(xyz_coords, cutoff=0.1):
-    """Return the unique coordinates of an atoms object
-    for the requrested atoms indices. Z-coordinates are projected
-    to maximum z-coordinate by default.
-
-    Parameters
-    ----------
-    xyz_coords : ndarray (n, 3)
-        Cartesian coordinates to identify unique xy positions from.
-    cutoff : float
-        Distance in Angstrons to consider xy-coordinate unique within.
-
-    Returns
-    -------
-    xy_pos : ndarray (m, 3)
-        Unique xy coordinates projected onto a maximal z coordinate.
-    """
-    xyz_coords[:, -1] = np.max(xyz_coords[:, -1])
-
-    xy_copies = []
-    for i, p in enumerate(xyz_coords[:, :-1]):
-        if i in xy_copies:
-            continue
-
-        dis = xyz_coords[:, :-1][:, None] - p
-        match = np.where(abs(dis).sum(axis=2).T < cutoff)[1]
-        xy_copies += match[1:].tolist()
-
-    xyz_coords = np.delete(xyz_coords, xy_copies, axis=0)
-
-    return xyz_coords
-
-
-def matching_sites(position, comparators, tol=1e-8):
-    """Get the indices of all points in a comparator list that are
-    equal to a given position (with a tolerance), taking into
-    account periodic boundary conditions (adaptation from Pymatgen).
-
+def get_matching_positions(fractional, tol=1e-8):
+    """Get the indices of all points in a position list that are
+    equal (with a tolerance), with periodic boundary conditions.
     This will only accept a fractional coordinate scheme.
 
     Parameters
     ----------
-    position : list (3,)
-        Fractional coordinate to compare to list.
-    comparators : list (3, n)
-        Fractional coordinates to compare against.
+    fractional : ndarray (N, 3)
+        Fractional coordinates to test for uniqueness.
     tol : float
-        Absolute tolerance.
-
-    Returns
-    -------
-    match : list (n,)
-        Indices of matches.
-    """
-    if len(comparators) == 0:
-        return []
-
-    fdist = comparators - position
-    fdist -= np.round(fdist)
-    match = np.where((np.abs(fdist) < tol).all(axis=1))[0]
-
-    return match
-
-
-
-
-def matching_coordinates(position, comparators, tol=1e-8):
-    """Get the indices of all points in a comparator list that are
-    equal to a given position (with a tolerance), taking into
-    account periodic boundary conditions (adaptation from Pymatgen).
-
-    This will only accept a Cartesian coordinate scheme.
-    TODO: merge this with matching_sites.
-
-    Parameters
-    ----------
-    position : list (3,)
-        Fractional coordinate to compare to list.
-    comparators : list (3, N)
-        Fractional coordinates to compare against.
-    tol : float
-        Absolute tolerance.
+        Float point precision tolerance.
 
     Returns
     -------
     match : list (N,)
         Indices of matches.
     """
-    if len(comparators) == 0:
-        return []
+    match = np.arange(fractional.shape[0])
+    for i, j in enumerate(match):
+        if i != j:
+            continue
 
-    fdist = comparators - position[None, :]
-    match = np.where((np.abs(fdist) < tol).all(axis=1))[0]
+        diff = fractional[:, None] - fractional[i]
+        diff -= np.floor(diff + tol)
+        matched = np.all(diff < tol, -1).flatten()
+        match[matched] = i
 
     return match
-
-
-def get_unique_coordinates(atoms, axis=2, tol=1e-5):
-    """Return unique coordinate values of a given atoms object
-    for a specified axis.
-
-    Parameters
-    ----------
-    atoms : Atoms object
-        Atoms object to search for unique values along.
-    axis : int  (0 | 1 | 2)
-        Look for unique values along the x, y, or z axis.
-    tol : float
-        Float point precision tolerance.
-
-    Returns
-    -------
-    values : ndarray (N,)
-        Unique positions in fractional coordinates.
-    """
-    ltol = -int(np.log10(tol))
-    positions = atoms.get_scaled_positions()[:, axis]
-    fractional = positions - np.round(positions.round(ltol))
-
-    _, index, inv = np.unique(
-        fractional, return_index=True, return_inverse=True)
-
-    return positions[index]
 
 
 def get_integer_enumeration(N=3, span=[0, 2]):
@@ -276,31 +181,3 @@ def get_integer_enumeration(N=3, span=[0, 2]):
     enumeration = np.mgrid[[span] * N].reshape(N, -1).T
 
     return enumeration
-
-
-def get_matching_positions(fractional):
-    """Return the indices of the given fractional coordinates
-    which overlap.
-
-    Parameters
-    ----------
-    fractional ndarray of float (N, 3)
-
-    Returns
-    -------
-    match : ndarray of bool (N,)
-        The indices which correspond to sites with equivalent
-        positions.
-    """
-    original_index = np.arange(fractional.shape[0])
-    periodic_match = original_index.copy()
-    for i, j in enumerate(periodic_match):
-        if i != j:
-            continue
-
-        matched = matching_sites(fractional[i], fractional)
-        periodic_match[matched] = i
-
-    match = periodic_match != original_index
-
-    return match

@@ -10,6 +10,7 @@ import itertools
 import warnings
 import scipy
 import ase
+import re
 
 
 class SlabGenerator():
@@ -34,201 +35,63 @@ class SlabGenerator():
     miller_index : list (3,) or (4,)
         Miller index to construct surface from. If length 4, Miller-Bravais
         notation is assumed.
-    layers : int
+    layers : int | str
         Number of layers to include in the slab. A slab layer is defined
-        as a unique z-coordinate.
-    vacuum : float
-        Angstroms of vacuum to apply to the slab.
-    fixed : int
-        Number of slab layers to constrain.
-    layer_type : 'angs', 'trim', 'stoich', or 'sym'
-        Determines how to perform slab layering.
+        as a unique z-coordinate. If a string is passed, the type of layering
+        will be altered.
 
-        'angs': Layers denotes the thickness of the slab in Angstroms.
-        'trim': The slab will be trimmed to a number of layers equal to the
-        exact number of unique z-coordinates. Useful for precision control.
-        'stoich' : Constraints any slab generated to have the same
+        'A': Layers denotes the thickness of the slab in Angstroms.
+        'S' : Constraints any slab generated to have the same
         stoichiometric ratio as the provided bulk.
-        'sym' : Return a slab which is inversion symmetric. i.e. The
-        same on both sides.
-    attach_graph : bool
-        Attach the connectivity graph generated from the bulk structure.
-        This is only necessary for fingerprinting and setting it to False
-        can save time. Surface atoms will be found regardless.
-    standardize_bulk : bool
-        Covert the bulk input to its standard form before and
-        produce the cleave from it. This is highly recommended as
-        Miller indices are not defined for non-standard cells.
+        'I' : Return a slab which is inversion symmetric.
     tol : float
         Tolerance for floating point rounding errors.
     """
 
-    def __init__(self,
-                 bulk,
-                 miller_index,
-                 layers,
-                 vacuum=None,
-                 fixed=None,
-                 layer_type='ang',
-                 attach_graph=True,
-                 standardize_bulk=False,
-                 primitive=True,
-                 tol=1e-8):
-        self.layers = layers
-        self.vacuum = vacuum
-        self.fixed = fixed
+    def __init__(
+            self,
+            bulk,
+            miller_index,
+            termination=0,
+            layers=1,
+            tol=1e-8):
         self.tol = tol
-        self.layer_type = layer_type
-        self.standardized = standardize_bulk
-        self.primitive = primitive
-        self.attach_graph = attach_graph
-        self.unique_terminations = None
-        self.slab_basis = None
-        self.slab = None
 
-        miller_index = np.array(miller_index)
-        if len(miller_index) == 4:
-            miller_index[[0, 1]] -= miller_index[2]
-            miller_index = np.delete(miller_index, 2)
-        miller_index = (miller_index /
-                        utils.list_gcd(miller_index)).astype(int)
-
-        # Store the Miller indices associated with the standard cell.
-        self.miller_index = miller_index
-
-        if standardize_bulk:
-            bulk = symmetry.get_standardized_cell(bulk, tol=1e-2)
-        else:
-            warnings.warn(
-                ("Not using a standardized bulk will result in an arbitrary "
-                 "Miller index. To get ensure you are using the correct "
-                 "miller index, use standardize_bulk=True"))
-
-        if primitive:
-            primitive_bulk = symmetry.get_standardized_cell(
-                bulk, primitive=True, tol=1e-2)
-            miller_index = convert_miller_index(
-                miller_index, bulk, primitive_bulk)
-        else:
-            primitive_bulk = bulk
+        self.layer_type = re.findall('[a-zA-Z]', str(layers))
+        self.layers = float(re.sub('[a-zA-Z]', '', str(layers)))
 
         self._bulk = gen.bulk.align_crystal(
-            primitive_bulk, miller_index, self.tol)
+            bulk, miller_index, tol)
 
-        self.unique_terminations = gen.bulk.get_unique_terminations(
-            self._bulk, self.tol)
-        self.slab_basis = [None] * len(self.unique_terminations)
+        self.miller = bravis_miller_to_miller(miller_index)
 
-    def get_slab_basis(self, iterm=0, maxn=20):
-        """Return a list of all terminations which have been properly shifted
-        and with an appropriate number of layers added. This function is mainly
-        for performance, to prevent looping over other operations which are not
-        related the size of the slab.
-
-        This step also contains periodically constrained orthogonalization of
-        the c basis. This implementation only works if the a and b basis
-        vectors are properly aligned with the x and y axis. This is strictly to
-        assist the correct identification of surface atoms.
-
-        Only produces the terminations requested as a lazy evaluator.
-
-        Parameters
-        ----------
-        iterm : int
-            Index of the slab termination to return.
-        maxn : int
-            The maximum integer component to search for a more orthogonal bulk.
-
-        Returns
-        -------
-        ibasis : Gratoms object
-            Prepared, ith basis.
-        """
-        if self.slab_basis[iterm] is not None:
-            ibasis = self.slab_basis[iterm].copy()
-            return ibasis
-
-        _basis = self._bulk.copy()
-        ibasis = _basis.copy()
-        if iterm > 0:
-            zshift = terminations[iterm]
-            scaled_positions = ibasis.get_scaled_positions()
-            scaled_positions[:, 2] -= zshift - self.tol
-            ibasis.set_scaled_positions(scaled_positions)
-            ibasis.wrap(pbc=True)
-
-        bulk_layers = utils.get_unique_coordinates(_basis)
-
-        if self.layer_type != 'trim':
-            height = np.abs(self._bulk.cell[2][2])
-            minimum_repetitions = np.ceil(self.layers / height)
+        zpos = np.sort(self._bulk.positions[:, 2])
+        if 'A' in self.layer_type:
+            layers = self.layers / self._bulk.cell[2][2]
+            self.repetitions = np.ceil(layers)
         else:
-            minimum_repetitions = np.ceil(self.layers / len(bulk_layers))
+            zlayers = utils.get_matching_positions(zpos)
+            layers = self.layers / len(np.unique(zlayers))
+            self.repetitions = int(np.ceil(layers))
 
-        ibasis *= (1, 1, int(minimum_repetitions))
+        terminations = gen.bulk.get_unique_terminations(
+            self._bulk, tol)
 
-        # Get difference in the 2nd components of the b and c
-        # basis, this is a good starting guess for the needed
-        # value of the 2nd component (+/- 2 for safety)
-        div = ibasis.cell[2][1] / ibasis.cell[1][1]
-        sign = -np.sign(div)
-        if sign == 0:
-            sign = 1
-        m = np.ceil(np.abs(div)) + 1
+        self.basis = self._bulk.copy()
 
-        # Try to be smart and only search a limited space
-        search = np.mgrid[maxn:-maxn-1:-1, sign*m:m-4*sign:-sign, 1:2]
-        search = search.T.reshape(-1, 3)
+        generator = gen.bulk.GraphGenerator(self.basis)
+        positions, connectivity = generator.get_adsorption_sites()
+        self.basis *= [1, 1, self.repetitions]
+        self.basis.set_surface_atoms(generator.surface_atoms)
 
-        # Need the reciprocal unit cell.
-        recp = np.linalg.inv(ibasis.cell).T
-        normal = np.dot(self.miller_index, recp)
-        normal /= np.linalg.norm(normal)
+        fractional= np.linalg.solve(self.basis.cell.T, positions.T).T
+        sym = gen.adsorption.symmetry_equivalent_points(
+            fractional, self.basis)
+        con = np.array([len(_) for _ in connectivity])
+        self.basis.set_site_properties(
+            positions, symmetry=sym, connectivity=con)
 
-        # Compute the lengths of the possible transformed vectors
-        # and the cosine of the vector normal to the miller plane.
-        vectors = np.dot(search, ibasis.cell)
-        length = np.linalg.norm(vectors, axis=1)
-        angles = np.abs(np.dot(vectors, normal) / length)
-
-        # Find the cosine closest to 1 and the smallest lengths
-        sort = np.lexsort([angles, length])
-        scale = np.eye(3)
-        scale[2] = search[sort[0]]
-
-        newcell = np.dot(scale, ibasis.cell)
-        ibasis.set_cell(newcell)
-        ibasis.wrap()
-
-        exbasis = ibasis * (1, 1, 2)
-        connectivity = utils.get_voronoi_neighbors(exbasis)
-
-        n = len(ibasis)
-        diff = connectivity[:n, n:].sum(axis=1)
-        surf_atoms = diff != 0
-
-        if np.all(diff):
-            warnings.warn(
-                ("Your slab has no bulk atoms and may be too thin "
-                 "to identify surface atoms correctly. This may cause "
-                 "surface adsorption site identification to fail."))
-
-        # TODO: Graph generation needs to go here once handling of
-        # unit cell repetitions is implemented.
-        scaled_zpositions = ibasis.get_scaled_positions()[:, 2] + self.tol
-        scaled_zpositions = np.round(scaled_zpositions % 1 + self.tol, 4)
-
-        indices = np.argwhere(surf_atoms).flatten()
-        zcoords = scaled_zpositions - np.mean(scaled_zpositions)
-        top = indices[zcoords[indices] >= 0]
-        bottom = indices[zcoords[indices] < 0]
-        ibasis.set_surface_atoms(top=top)
-
-        self.slab_basis[iterm] = ibasis
-
-        return ibasis
-
-    def get_slab(self, size=1, iterm=0):
+    def get_slab(self, size=1, vacuum=0):
         """Generate a slab from the bulk structure. This function is meant
         specifically for selection of an individual termination or enumeration
         through surfaces of various size.
@@ -238,9 +101,9 @@ class SlabGenerator():
 
         Parameters
         ----------
-        size : int, array_like (2,) or (2, 2)
+        size : int | array_like (2, 2)
             Size of the unit cell to create as described in :meth:`set_size`.
-        iterm : int
+        termination : int
             A termination index in reference to the list of possible
             terminations.
 
@@ -250,159 +113,57 @@ class SlabGenerator():
             The modified basis slab produced based on the layer specifications
             given.
         """
-        slab = self.get_slab_basis(iterm).copy()
-        slab = self.set_size(slab, size)
+        slab = self.basis.copy()
+        slab = set_size(slab, size)
 
-        # Orthogonalize the z-coordinate
-        # Breaks bulk periodicity in the c-basis
-        slab.cell[2] = [0, 0, slab.cell[2][2]]
+        width = np.ptp(slab.positions[:, 2])
+        slab.cell[2] = [0, 0, width]
         slab.set_pbc([1, 1, 0])
 
-        if slab.cell[1][0] < 0:
-            slab = transform_ab(slab, [[-1, 0], [0, 1]])
+        sort = np.lexsort(slab.positions.T)
+        slab = slab[sort]
 
-        # Trim the bottom of the cell, bulk symmetry may be lost
-        if self.layer_type == 'trim':
-            zlayers = utils.get_unique_coordinates(slab)
-            reverse_sort = np.sort(zlayers)[::-1]
-            ncut = reverse_sort[:self.layers][-1] * slab.cell[2][2]
+        zpos = slab.positions[:, 2]
+        zlayers = utils.get_matching_positions(zpos)
+        _, tags = np.unique(zlayers, return_inverse=True)
+        slab.set_tags(tags + 1)
 
-            zpos = slab.positions[:, 2]
-            index = np.arange(len(slab))
-            del slab[index[zpos - ncut < -self.tol]]
+        R = np.diag([1, 1, -1])
+        cell = np.dot(slab.cell, R.T)
+        cell[2] *= -1
+        cell[2][2] += 2 * vacuum
 
-            slab.cell[2][2] -= ncut
-            slab.translate([0, 0, -ncut])
+        slab.cell = cell
+        slab.positions = np.dot(slab.positions, R.T)
+        slab.positions[:, 2] += width + vacuum
 
-        tl = np.argmax(slab.get_scaled_positions()[:, 2])
-        translation = slab[tl].position.copy()
-        translation[2] = 0
-        slab.translate(-translation)
-        slab.wrap()
+        if not 'S' in self.layer_type:
+            if 'A' in self.layer_type:
+                del slab[zpos > self.layers]
+            else:
+                del slab[(tags + 1) > self.layers]
 
-        if self.vacuum:
-            slab.center(vacuum=self.vacuum, axis=2)
+            if 'I' in self.layer_type:
+                slab = self.make_symmetric(slab)
 
-        # The position is for tagging
-        # positions = slab.positions
-        # tags = []
-        # for p in positions:
-        #     close = np.isclose(p, values[::-1], rtol=self.tol)
-        #     tags += [np.where(close)[0][0] + 1]
-        # slab.set_tags(tags)
+        slab.wrap(eps=self.tol)
 
-        if self.layer_type == 'sym':
-            slab = self.make_symmetric(slab)
+        sites = slab._sites
+        if sites:
+            sites.cell = cell
+            sites.positions = np.dot(sites.positions, R.T)
+            sites.positions[:, 2] += width + vacuum
+            fpos = np.linalg.solve(cell.T, sites.positions.T).T
+            fpos -= np.floor(fpos + self.tol)
+            sites.positions = np.dot(fpos - self.tol, cell)
+            sort = np.hstack([
+                sites.positions,
+                sites.arrays['connectivity'][:, None]])
 
-        roundoff = np.isclose(slab.cell, 0)
-        slab.cell[roundoff] = 0
-
-        ind = np.lexsort(slab.positions.T)
-        slab = slab[ind]
-
-        if self.fixed:
-            tags = slab.get_tags()
-            constraints = ase.constraints.FixAtoms(
-                mask=tags > (tags.max() - self.fixed))
-            slab.set_constraint(constraints)
-
-        self.slab = slab
+            sort = np.lexsort(sort.T)
+            slab._sites = sites[sort]
 
         return slab
-
-    def adsorption_sites(self, slab, **kwargs):
-        """Helper function to return the adsorption sites of the provided slab.
-
-        Parameters
-        ----------
-        slab : atoms object
-            The slab to find adsorption sites for. Assumes you are using
-            the same basis.
-
-        Returns
-        -------
-        output : tuple (n, n) | (n, n, n)
-            Coordinates and connectivity of the adsorption sites.
-            The symmetry indices can also be returned.
-        """
-        output = adsorption.get_adsorption_sites(
-            slab=slab, **kwargs)
-
-        return output
-
-    def set_size(self, slab, size):
-        """Set the size of a slab based one of three methods.
-
-        1. An integer value performs a search of valid matrix operations
-        to perform on the ab-basis vectors to return a set which with
-        a minimal sum of distances and an angle closest to 90 degrees.
-
-        2. An array_like of length 2 will multiply the existing basis
-        vectors by that amount.
-
-        3. An array of shape (2, 2) will be interpreted as matrix
-        notation to multiply the ab-basis vectors by.
-
-        Parameters
-        ----------
-        slab : Atoms object
-            Slab to be made into the requested size.
-        size : int, array_like (2,) or (2, 2)
-            Size of the unit cell to create as described above.
-
-        Returns
-        -------
-        supercell : Gratoms object
-            Supercell of the requested size.
-        """
-        supercell = slab
-
-        if isinstance(size, (int, np.integer)):
-            transforms = generate_transforms(size)
-
-            targets = np.empty((len(transforms), 3))
-            for i, M in enumerate(transforms):
-                cell = np.dot(M.T, supercell.cell[:2, :2])
-                distance = np.linalg.norm(cell, axis=1)
-                angle = np.round(np.dot(*cell) / np.prod(distance), 2)
-
-                dM = M.copy()
-                dM[[0, 1], [0, 1]] -= 1
-                dM = int(np.abs(dM).sum())
-                d = distance.sum().round(2)
-
-                targets[i] = [dM, np.abs(angle), d]
-
-            if defaults.get('orthogonal'):
-                targets = targets.swapaxes(1, 2)
-            srt = np.lexsort(targets.T)
-            matrix = transforms[srt[0]]
-
-            if targets[srt[0]][0] != 0:
-                supercell = gen.bulk.resize_cell(supercell, matrix)
-
-        elif isinstance(size, (list, tuple, np.ndarray)):
-            size = np.array(size, dtype=int)
-
-            if size.shape == (2,):
-                supercell *= (size[0], size[1], 1)
-            elif size.shape == (2, 2):
-                supercell = gen.bulk.resize_cell(supercell, size)
-
-        if self.attach_graph:
-            # TODO: Creating the graph at this point is not ideal.
-            # Need to be able to handle expansion of the unit cell
-            # before this can be moved back to basis creation
-            n = len(supercell)
-            exsupercell = supercell * (1, 1, 2)
-
-            # Look into making bulk more orthogonal
-            exsupercell.wrap()
-            connectivity = utils.get_voronoi_neighbors(exsupercell)
-            edges = utils.connectivity_to_edges(connectivity[:n, :n])
-            supercell.graph.add_weighted_edges_from(edges, weight='bonds')
-
-        return supercell
 
     def make_symmetric(self, slab):
         """Returns a symmetric slab. Note, this will trim the slab potentially
@@ -426,6 +187,52 @@ class SlabGenerator():
                 break
 
         return slab
+
+def set_size(slab, size):
+    """Set the size of a slab based one of two methods.
+
+    1. An integer value performs a search of valid matrix operations
+    to perform on the ab-basis vectors to return a set which with
+    a minimal sum of distances and an angle closest to 90 degrees.
+
+    2. An array of shape (2, 2) will be interpreted as matrix
+    notation to multiply the ab-basis vectors by.
+
+    Parameters
+    ----------
+    slab : Atoms object
+        Slab to be made into the requested size.
+    size : int | array_like  (2, 2)
+        Size of the unit cell to create as described above.
+
+    Returns
+    -------
+    slab : Gratoms object
+        Supercell of the requested size.
+    """
+    size = np.asarray(size, dtype=int)
+    if size.shape == (2, 2):
+        matrix = size
+    else:
+        transforms = generate_transforms(size)
+
+        targets = np.empty((len(transforms), 2))
+        for i, M in enumerate(transforms):
+            cell = np.dot(M.T, slab.cell[:2, :2])
+            dis = np.linalg.norm(cell, axis=1)
+            angle = np.round(np.dot(*cell) / np.prod(dis), 2)
+
+            targets[i] = [np.abs(angle), dis.sum().round(2)]
+
+        if defaults.get('orthogonal'):
+            targets = targets.swapaxes(1, 2)
+        srt = np.lexsort(targets.T)
+        matrix = transforms[srt[0]]
+
+    slab = gen.bulk.resize_cell(slab, matrix)
+
+    return slab
+
 
 def convert_miller_index(miller_index, atoms1, atoms2):
     """Return a converted miller index between two atoms objects."""
@@ -497,6 +304,7 @@ def get_unique_indices(bulk, max_index):
         for affine_matrix in operations:
             operation = np.dot(affine_matrix, affine_point)[:3]
 
+            # TODO: This function is replaced with get_matching_positions
             match = utils.matching_coordinates(operation, unique_millers)
             if len(match) > 0:
                 symmetric = True
@@ -563,8 +371,10 @@ def generate_transforms(volume):
         rows and columns.
     """
     N = volume
-    cd = np.mgrid[slice(-N, 1), slice(0, 1)].reshape(2, -1).T
-    AB = utils.get_integer_enumeration(N=2, span=[0, int(N**0.5) + 1])
+    cd = np.mgrid[slice(-N, 0), slice(0, 1)].reshape(2, -1).T
+    cd = np.vstack([[0, 0], cd, cd[:, ::-1]])
+    AB = utils.get_integer_enumeration(
+        N=2, span=[0, int(N**0.5) + 1])[1:]
     products = np.prod(AB, 1) - N
 
     transforms = []
@@ -575,6 +385,7 @@ def generate_transforms(volume):
             ab = utils.get_whole_factors(abs(v))
             sign = np.sign(v)
             ab[:, 0] *= sign
+            ab = np.vstack([ab, ab[:, ::-1]])
 
         diag = np.tile(AB[i], len(ab))
         M = np.c_[diag, ab.flatten()]
@@ -583,3 +394,27 @@ def generate_transforms(volume):
     transforms = np.vstack(transforms)
 
     return transforms
+
+
+def bravis_miller_to_miller(bravis_miller):
+    """Bravis Miller index conversion to standard miller index.
+
+    Parameters:
+    -----------
+    bravis_miller : array_like (4,)
+        Four integer miller index.
+
+    Returns:
+    --------
+    miller_index : ndarray (3,)
+        Converted miller index.
+    """
+    miller_index = np.array(bravis_miller)
+    if len(miller_index) == 4:
+        miller_index[[0, 1]] -= miller_index[2]
+        miller_index = np.delete(miller_index, 2)
+    miller_index = (miller_index /
+                    utils.list_gcd(miller_index)).astype(int)
+    miller_index = miller_index
+
+    return miller_index
