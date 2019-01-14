@@ -656,16 +656,18 @@ class Builder(AdsorptionSites):
             uvec = [-uvec0, uvec1[0], uvec2[0]]
             self._branch_bidentate(atoms, uvec, branches0[0])
             for branch in branches0[1:]:
-                catkit.gen.molecules._branch_molecule(
+                npos = catkit.gen.molecules._branch_molecule(
                     atoms, branch, adsorption=True)
+                atoms.positions[branch[1]] = npos
 
         branches1 = list(nx.bfs_successors(atoms.graph, bonds[1]))
         if len(branches1[0][1]) != 0:
             uvec = [uvec0, uvec1[0], uvec2[0]]
             self._branch_bidentate(atoms, uvec, branches1[0])
             for branch in branches1[1:]:
-                catkit.gen.molecules._branch_molecule(
+                npos = catkit.gen.molecules._branch_molecule(
                     atoms, branch, adsorption=True)
+                atoms.positions[branch[1]] = npos
 
         n = len(slab)
         slab += atoms
