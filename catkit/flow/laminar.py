@@ -104,7 +104,6 @@ class Laminar():
         workflow = fireworks.Workflow([firework], name=workflow_name)
         self.launchpad.add_wf(workflow)
 
-
     def submit_relaxation_db(self, database, spec=None):
         """Submit each entry of an ASE database for relaxation.
         This requires that the calculation parameters be stored in

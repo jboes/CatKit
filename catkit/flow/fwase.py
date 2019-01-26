@@ -105,7 +105,7 @@ def catflow_relaxation(atoms=None, parameters=None, calculator_name=None):
         image.constraints = atoms.constraints
         image._pbc = atoms.pbc
 
-    # with db.Connect() as dbflow:
-    #     dbflow.update_bulk_entry(images)
+    with db.Connect() as dbflow:
+        dbflow.update_bulk_entry(images)
 
     return fwio.atoms_to_encode(images)

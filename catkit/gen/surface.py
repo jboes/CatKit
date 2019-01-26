@@ -3,13 +3,9 @@ from .. import Gratoms
 from catkit import gen
 from . import symmetry
 from . import utils
-from . import adsorption
 from . import defaults
 import numpy as np
-import itertools
 import warnings
-import scipy
-import ase
 import re
 
 
@@ -84,7 +80,7 @@ class SlabGenerator():
         self.basis *= [1, 1, self.repetitions]
         self.basis.set_surface_atoms(generator.surface_atoms)
 
-        fractional= np.linalg.solve(self.basis.cell.T, positions.T).T
+        fractional = np.linalg.solve(self.basis.cell.T, positions.T).T
         sym = gen.adsorption.symmetry_equivalent_points(
             fractional, self.basis)
         con = np.array([len(_) for _ in connectivity])
@@ -137,7 +133,7 @@ class SlabGenerator():
         slab.positions = np.dot(slab.positions, R.T)
         slab.positions[:, 2] += width + vacuum
 
-        if not 'S' in self.layer_type:
+        if 'S' not in self.layer_type:
             if 'A' in self.layer_type:
                 del slab[zpos > self.layers]
             else:

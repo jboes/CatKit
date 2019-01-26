@@ -1,5 +1,4 @@
 import catkit
-import numpy as np
 import ase.build
 import ase
 
@@ -40,7 +39,7 @@ def surface(
         size,
         miller=(1, 1, 1),
         termination=0,
-        vacuum=12,
+        vacuum=6,
         fixed=0,
         **kwargs):
     """A helper function to return the surface associated with a
