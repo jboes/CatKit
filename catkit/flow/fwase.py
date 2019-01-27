@@ -129,6 +129,9 @@ def run_mlneb(
         images = ase.io.read(images, ':')
 
     parameters = images[0].info['calculator_parameters']
+    parameters['calculation'] = 'scf'
+    parameters['tprnfor'] = True
+
     calculator = utils.str_to_class('catlearn.optimize.mlneb.MLNEB')
     neb_catlearn = calculator(
         ase_calc=parameters,
