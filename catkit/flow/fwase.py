@@ -109,3 +109,38 @@ def catflow_relaxation(atoms=None, parameters=None, calculator_name=None):
         dbflow.update_bulk_entry(images)
 
     return fwio.atoms_to_encode(images)
+
+
+def run_mlneb(
+        images='input.traj',
+        out_file='neb.traj'):
+    """Performs a MLNEB call with a compatible ase calculator.
+    Keywords are defined inside the atoms object information.
+
+    Parameters
+    ----------
+    images: list of Atoms objects | str
+        User provided iniital guess for the NEB pathway. Parameters for
+        the calculator should be placed into the first image.
+    out_file: str
+        Name of the file to store output.
+    """
+    if isinstance(images, str):
+        images = ase.io.read(images, ':')
+
+    parameters = images[0].info['calculator_parameters']
+    calculator = utils.str_to_class('catlearn.optimize.mlneb.MLNEB')
+    neb_catlearn = calculator(
+        ase_calc=parameters,
+        interpolation=images
+    )
+
+    # Perform the calculation and write trajectory from log.
+    fmax = parameters.get('fmax', 0.05)
+    neb_catlearn.run(fmax=fmax, trajectory=out_file)
+
+    # run_mlneb will always use decaf.Espresso
+    images = ase.io.read(out_file, ':')
+    images[0].info = parameters
+
+    return fwio.atoms_to_encode(images)
