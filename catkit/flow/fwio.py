@@ -99,7 +99,7 @@ def atoms_to_encode(images):
                 constraints[i]['kwargs'][k] = v.tolist()
 
     # Convert any arrays from the parameter settings into lists
-    keys = images[0].info['calculator_parameters']
+    keys = images[0].info.get('calculator_parameters')
     array_to_list(keys)
 
     data = {'trajectory': {}}

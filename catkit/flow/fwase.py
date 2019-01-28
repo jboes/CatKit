@@ -30,10 +30,11 @@ def get_potential_energy(
         Name of the output file to read the completed trajectory form.
     """
     atoms = ase.io.read(in_file)
+    parameters = atoms.info['calculator_parameters']
 
     # Setting up the calculator
     calculator = utils.str_to_class(calculator)
-    calc = calculator(atoms, **atoms.info['calculator_parameters'])
+    calc = calculator(atoms, **parameters)
 
     # Perform the calculation and write trajectory from log.
     atoms.get_potential_energy()
@@ -45,6 +46,7 @@ def get_potential_energy(
         images = ase.io.read(out_file, ':')
 
     # Moneky patch for constraints and pbc conservation.
+    images[0].info['calculator_parameters'] = parameters
     for image in images:
         image.constraints = atoms.constraints
         image._pbc = atoms.pbc
